@@ -9,4 +9,5 @@ distributor           = subject
 desktop_uidir         = ui
 desktop_applaunchname = lanlink.Application
 service_port          = 8787
+checkport             = false
 ctl_stop              = true

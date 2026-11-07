@@ -1,0 +1,31 @@
+[
+  {
+    "stepTitle": "LanLink 服务设置",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_port",
+        "label": "服务端口",
+        "initValue": "8787",
+        "placeholder": "默认 8787",
+        "rules": [
+          { "required": true, "message": "请填写服务端口" },
+          { "pattern": "^[0-9]+$", "message": "端口只能是数字" },
+          { "min": 1024, "max": 65535, "message": "端口范围 1024-65535" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_data_dir",
+        "label": "数据目录（可以留空）",
+        "initValue": "",
+        "placeholder": "留空则使用默认目录",
+        "rules": [{ "pattern": "^(/.*)?$", "message": "请填写以 / 开头的绝对路径" }]
+      },
+      {
+        "type": "tips",
+        "helpText": "聊天记录和上传的文件会长期保存在数据目录里，建议选一个有足够空间的目录，例如 /vol1/1000/lanlink。留空则使用应用默认目录，可在文件管理器的「LanLink → data」里看到。安装后也可以在「应用设置」里修改端口和数据目录。"
+      }
+    ]
+  }
+]

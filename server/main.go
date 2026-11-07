@@ -44,6 +44,12 @@ func main() {
 	if err := os.MkdirAll(abs, 0o755); err != nil {
 		log.Fatalf("无法创建数据目录: %v", err)
 	}
+	// 目录存在不代表能写（换到别的用户目录时很常见），启动时就探一下，别等上传时才报错
+	probe := filepath.Join(abs, ".write-test")
+	if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {
+		log.Fatalf("数据目录不可写，请更换数据目录或检查权限: %v", err)
+	}
+	_ = os.Remove(probe)
 
 	store, err := OpenStore(abs)
 	if err != nil {

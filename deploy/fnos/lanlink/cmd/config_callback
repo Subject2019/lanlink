@@ -1,4 +1,77 @@
 #!/bin/bash
-# fnOS 生命周期钩子：config_callback（LanLink 无需额外处理，仅记录日志）
-echo "$(date "+%Y-%m-%d %H:%M:%S") - config_callback" >> "${TRIM_PKGVAR:-/tmp}/app.log" 2>/dev/null
+# 应用设置保存后：校验新的端口与数据目录，并更新 ${TRIM_PKGETC}/settings.conf。
+# 如果设置页没有带值过来（例如字段被清空），沿用上一次保存的值。
+
+PKGVAR="${TRIM_PKGVAR:-/tmp}"
+PKGETC="${TRIM_PKGETC:-$PKGVAR}"
+LOG_FILE="${PKGVAR}/app.log"
+CONF="${PKGETC}/settings.conf"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - [config] $1" >> "$LOG_FILE" 2>/dev/null
+}
+
+fail() {
+  log_msg "$1"
+  echo "$1" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+  exit 1
+}
+
+can_write() {
+  local dir="$1" rc
+  if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
+    su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
+    rc=$?
+  else
+    : > "$dir/.lanlink_write_test" 2>/dev/null
+    rc=$?
+  fi
+  rm -f "$dir/.lanlink_write_test" 2>/dev/null
+  return $rc
+}
+
+old_port=""
+old_dir=""
+if [ -f "$CONF" ]; then
+  . "$CONF"
+  old_port="$port"
+  old_dir="$data_dir"
+fi
+
+PORT="${wizard_port:-$old_port}"
+PORT="${PORT:-${TRIM_SERVICE_PORT:-8787}}"
+DATA_DIR="${wizard_data_dir:-$old_dir}"
+
+case "$PORT" in
+  ''|*[!0-9]*) fail "服务端口必须是数字，当前填的是：$PORT" ;;
+esac
+if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
+  fail "服务端口需要在 1024-65535 之间，当前填的是：$PORT"
+fi
+
+log_msg "wizard_port=$PORT wizard_data_dir=${DATA_DIR:-（默认）}"
+
+if [ -n "$DATA_DIR" ]; then
+  case "$DATA_DIR" in
+    /*) ;;
+    *) fail "数据目录必须是绝对路径（以 / 开头），当前填的是：$DATA_DIR" ;;
+  esac
+  case "$DATA_DIR" in
+    *..*) fail "数据目录不能包含 ..，当前填的是：$DATA_DIR" ;;
+  esac
+  mkdir -p "$DATA_DIR" 2>/dev/null || fail "无法创建数据目录：$DATA_DIR"
+  if [ "$(id -u)" = "0" ] && [ -n "$TRIM_UID" ] && [ -n "$TRIM_GID" ]; then
+    chown "$TRIM_UID:$TRIM_GID" "$DATA_DIR" 2>/dev/null
+  fi
+  chmod 770 "$DATA_DIR" 2>/dev/null
+  if ! can_write "$DATA_DIR"; then
+    fail "应用用户（${TRIM_USERNAME:-lanlink}）无法写入数据目录，请换一个目录或调整权限：$DATA_DIR"
+  fi
+  log_msg "数据目录已就绪：$DATA_DIR（重启应用后生效）"
+fi
+
+mkdir -p "$PKGETC" 2>/dev/null
+printf 'port=%s\ndata_dir=%s\n' "$PORT" "$DATA_DIR" > "$CONF" 2>/dev/null
+chmod 644 "$CONF" 2>/dev/null
+
 exit 0

@@ -1,14 +1,28 @@
 #!/bin/bash
 # LanLink 飞牛应用：启动 / 停止 / 状态
+# 端口与数据目录来自安装向导（wizard_port / wizard_data_dir），
+# 同时备份在 ${TRIM_PKGETC}/settings.conf，避免启动时拿不到向导变量。
 
 APP_DIR="${TRIM_APPDEST}/server"
 BIN="${APP_DIR}/lanlink-server"
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
+PKGETC="${TRIM_PKGETC:-$PKGVAR}"
 LOG_FILE="${PKGVAR}/app.log"
 PID_FILE="${PKGVAR}/app.pid"
-DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
-PORT="${TRIM_SERVICE_PORT:-8787}"
+CONF="${PKGETC}/settings.conf"
 
+port=""
+data_dir=""
+if [ -f "$CONF" ]; then
+  # 由本应用自己写入的两行键值，内容已在校验阶段规范过
+  . "$CONF"
+fi
+
+PORT="${wizard_port:-${port:-${TRIM_SERVICE_PORT:-8787}}}"
+DATA_DIR="${wizard_data_dir:-${data_dir:-}}"
+if [ -z "$DATA_DIR" ]; then
+  DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+fi
 if [ -z "$DATA_DIR" ]; then
   DATA_DIR="${PKGVAR}/data"
 fi
@@ -19,6 +33,10 @@ log_msg() {
 
 check_process() {
   kill -0 "$1" 2>/dev/null
+}
+
+port_in_use() {
+  ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
 }
 
 status_app() {
@@ -38,7 +56,16 @@ start_app() {
     return 0
   fi
 
-  mkdir -p "$DATA_DIR"
+  if port_in_use "$PORT"; then
+    log_msg "端口 $PORT 已被其他程序占用，启动失败。请在应用设置里换一个端口。"
+    exit 1
+  fi
+
+  mkdir -p "$DATA_DIR" || {
+    log_msg "无法创建数据目录 $DATA_DIR，启动失败。"
+    exit 1
+  }
+
   log_msg "Starting LanLink on :$PORT (data: $DATA_DIR)"
   cd "$APP_DIR" || exit 1
   # 默认免加入码，局域网设备打开网页填个名字就能用。
