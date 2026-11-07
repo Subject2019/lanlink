@@ -15,6 +15,16 @@
 界面只有一份（`server/web/`，原生 HTML/CSS/JS，约 20KB，无框架），
 改版对所有设备同时生效，永远不需要重新打包客户端。
 
+## 现成的包
+
+不想自己编译就直接用 `release/` 里的成品（含 sha256 校验）：
+
+| 文件 | 用途 |
+| --- | --- |
+| `release/lanlink.fpk` | 飞牛 fnOS 应用包，应用中心「手动安装」 |
+| `release/lanlink-android.apk` | 安卓壳（可选） |
+| `release/lanlink-server` / `-arm64` | Linux 服务端，手动部署用 |
+
 ## 安装到飞牛 fnOS
 
 仓库提供已打包好的原生应用（不是 Docker 应用，直接跑二进制）：
