@@ -32,6 +32,7 @@ func main() {
 	dataDir := flag.String("data", envOr("LANLINK_DATA", "./data"), "数据目录")
 	maxMB := flag.Int64("max-mb", 4096, "单个文件大小上限（MB）")
 	discover := flag.Bool("discover", true, "开启 UDP 自动发现，客户端可零配置连接")
+	open := flag.Bool("open", envOr("LANLINK_OPEN", "") == "1", "免加入码：局域网设备填个名字即可加入")
 	flag.Parse()
 
 	log.SetFlags(log.Ltime)
@@ -59,7 +60,7 @@ func main() {
 	}
 
 	app := &App{
-		cfg:   &Config{Addr: *addr, DataDir: abs, Code: code, MaxBytes: *maxMB << 20},
+		cfg:   &Config{Addr: *addr, DataDir: abs, Code: code, MaxBytes: *maxMB << 20, Open: *open},
 		store: store,
 		hub:   NewHub(),
 		web:   sub,
@@ -73,7 +74,7 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	printBanner(*addr, abs, code)
+	printBanner(*addr, abs, code, *open)
 
 	if *discover {
 		port := 8787
@@ -112,6 +113,7 @@ type Config struct {
 	DataDir  string
 	Code     string
 	MaxBytes int64
+	Open     bool
 }
 
 func envOr(k, def string) string {
@@ -121,8 +123,8 @@ func envOr(k, def string) string {
 	return def
 }
 
-// printBanner 打印局域网可访问地址，方便在手机/Windows 上直接输入。
-func printBanner(addr, dataDir, code string) {
+// printBanner 打印局域网可访问地址，方便在手机/平板上直接输入。
+func printBanner(addr, dataDir, code string, open bool) {
 	port := addr
 	if h, p, err := net.SplitHostPort(addr); err == nil {
 		_ = h
@@ -131,12 +133,20 @@ func printBanner(addr, dataDir, code string) {
 	fmt.Println("──────────────────────────────────────────")
 	fmt.Println(" LanLink 已启动")
 	fmt.Println(" 数据目录:", dataDir)
-	fmt.Printf(" 加入码  : %s\n", code)
-	fmt.Println(" 访问地址:")
-	for _, u := range lanURLs(port) {
-		fmt.Printf("   %s/?c=%s\n", u, code)
+	if open {
+		fmt.Println(" 加入码  : 已关闭（-open，局域网内填名字即可加入）")
+	} else {
+		fmt.Printf(" 加入码  : %s\n", code)
 	}
-	fmt.Printf("   http://127.0.0.1:%s/?c=%s\n", port, code)
+	fmt.Println(" 访问地址:")
+	suffix := "/?c=" + code
+	if open {
+		suffix = "/"
+	}
+	for _, u := range lanURLs(port) {
+		fmt.Printf("   %s%s\n", u, suffix)
+	}
+	fmt.Printf("   http://127.0.0.1:%s%s\n", port, suffix)
 	fmt.Println("──────────────────────────────────────────")
 }
 

@@ -20,6 +20,9 @@ const cookieName = "lanlink_token"
 func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"open": a.cfg.Open, "version": version})
+	})
 	mux.HandleFunc("POST /api/join", a.handleJoin)
 	mux.HandleFunc("GET /api/state", a.auth(a.handleState))
 	mux.HandleFunc("GET /api/events", a.auth(a.handleEvents))
@@ -92,10 +95,12 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "请求格式错误")
 		return
 	}
-	code := strings.TrimSpace(body.Code)
-	if subtle.ConstantTimeCompare([]byte(code), []byte(a.cfg.Code)) != 1 {
-		fail(w, http.StatusForbidden, "加入码不正确")
-		return
+	if !a.cfg.Open {
+		code := strings.TrimSpace(body.Code)
+		if subtle.ConstantTimeCompare([]byte(code), []byte(a.cfg.Code)) != 1 {
+			fail(w, http.StatusForbidden, "加入码不正确")
+			return
+		}
 	}
 	name := cleanName(body.Name)
 	if name == "" {

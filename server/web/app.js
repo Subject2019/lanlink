@@ -1,11 +1,16 @@
 // LanLink 前端：零依赖，直接操作 DOM，事件靠 SSE 推送。
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { me: null, messages: [], devices: [], es: null, uploading: false };
+  const state = { me: null, messages: [], devices: [], info: {}, es: null, uploading: false };
+
+  // 页面可能挂在根路径，也可能挂在反代前缀（/app/lanlink/）下，
+  // 用脚本自身的地址推导出基路径，所有请求都基于它，避免写死绝对路径。
+  const BASE = new URL('.', document.currentScript?.src || location.href).pathname;
+  const url = (p) => BASE + String(p).replace(/^\/+/, '');
 
   // ---------- 工具 ----------
   const api = async (path, opts = {}) => {
-    const res = await fetch(path, { credentials: 'same-origin', ...opts });
+    const res = await fetch(url(path), { credentials: 'same-origin', ...opts });
     if (res.status === 401) {
       showJoin();
       throw new Error('unauthorized');
@@ -71,7 +76,7 @@
       const a = document.createElement('a');
       a.className = 'bubble file';
       // n= 参数让安卓客户端的下载器能拿到真实文件名
-      a.href = `/api/files/${m.id}?n=${encodeURIComponent(m.file.name)}`;
+      a.href = url(`api/files/${m.id}?n=${encodeURIComponent(m.file.name)}`);
       a.setAttribute('download', m.file.name);
       const icon = document.createElement('span');
       icon.className = 'ficon';
@@ -137,7 +142,7 @@
   // ---------- 事件流 ----------
   function connect() {
     state.es?.close();
-    const es = new EventSource('/api/events');
+    const es = new EventSource(url('api/events'));
     state.es = es;
     es.onmessage = (e) => {
       let ev;
@@ -163,6 +168,15 @@
   }
 
   // ---------- 加载 ----------
+  async function loadInfo() {
+    try {
+      const res = await fetch(url('api/info'));
+      state.info = await res.json();
+    } catch {
+      state.info = {};
+    }
+  }
+
   async function boot() {
     try {
       const data = await api('/api/state');
@@ -184,8 +198,12 @@
     $('join').hidden = false;
     const c = new URLSearchParams(location.search).get('c');
     if (c) $('joinCode').value = c;
+    if (state.info?.open) {
+      $('codeRow').hidden = true;
+    }
     if (!$('joinName').value) $('joinName').value = platform() + ' 设备';
-    ($('joinCode').value ? $('joinName') : $('joinCode')).focus();
+    const needCode = !state.info?.open && !$('joinCode').value;
+    (needCode ? $('joinCode') : $('joinName')).focus();
   }
 
   // ---------- 发送 ----------
@@ -210,7 +228,7 @@
   function uploadFile(file) {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('PUT', '/api/files?name=' + encodeURIComponent(file.name));
+      xhr.open('PUT', url('api/files?name=' + encodeURIComponent(file.name)));
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
       xhr.setRequestHeader('X-File-Type', file.type || '');
       xhr.upload.onprogress = (e) => {
@@ -252,7 +270,8 @@
   $('btnJoin').addEventListener('click', async () => {
     const name = $('joinName').value.trim();
     const code = $('joinCode').value.trim();
-    if (!code) return ($('joinErr').textContent = '请输入加入码');
+    if (!state.info?.open && !code) return ($('joinErr').textContent = '请输入加入码');
+    if (!name) return ($('joinErr').textContent = '请输入设备名称');
     $('btnJoin').disabled = true;
     try {
       await api('/api/join', {
@@ -260,7 +279,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, name, platform: platform() }),
       });
-      history.replaceState(null, '', '/');
+      history.replaceState(null, '', BASE);
       $('joinErr').textContent = '';
       await boot();
     } catch (err) {
@@ -347,5 +366,5 @@
   });
   $('btnReload').addEventListener('click', () => boot());
 
-  boot();
+  loadInfo().then(boot);
 })();

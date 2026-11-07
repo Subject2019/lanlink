@@ -1,0 +1,4 @@
+#!/bin/bash
+# fnOS 生命周期钩子：config_callback（LanLink 无需额外处理，仅记录日志）
+echo "$(date "+%Y-%m-%d %H:%M:%S") - config_callback" >> "${TRIM_PKGVAR:-/tmp}/app.log" 2>/dev/null
+exit 0

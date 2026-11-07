@@ -1,0 +1,12 @@
+appname               = lanlink
+version               = 1.0.0
+display_name          = LanLink 邻传
+desc                  = 局域网互传文本与文件，手机平板电脑打开网页就能收发
+platform              = x86
+source                = thirdparty
+maintainer            = subject
+distributor           = subject
+desktop_uidir         = ui
+desktop_applaunchname = lanlink.Application
+service_port          = 8787
+ctl_stop              = true

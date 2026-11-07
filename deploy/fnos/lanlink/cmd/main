@@ -1,0 +1,92 @@
+#!/bin/bash
+# LanLink 飞牛应用：启动 / 停止 / 状态
+
+APP_DIR="${TRIM_APPDEST}/server"
+BIN="${APP_DIR}/lanlink-server"
+PKGVAR="${TRIM_PKGVAR:-/tmp}"
+LOG_FILE="${PKGVAR}/app.log"
+PID_FILE="${PKGVAR}/app.pid"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+PORT="${TRIM_SERVICE_PORT:-8787}"
+
+if [ -z "$DATA_DIR" ]; then
+  DATA_DIR="${PKGVAR}/data"
+fi
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+check_process() {
+  kill -0 "$1" 2>/dev/null
+}
+
+status_app() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+    if [ -n "$pid" ] && check_process "$pid"; then
+      return 0
+    fi
+    rm -f "$PID_FILE"
+  fi
+  return 1
+}
+
+start_app() {
+  if status_app; then
+    return 0
+  fi
+
+  mkdir -p "$DATA_DIR"
+  log_msg "Starting LanLink on :$PORT (data: $DATA_DIR)"
+  cd "$APP_DIR" || exit 1
+  # 默认免加入码，局域网设备打开网页填个名字就能用。
+  # 需要加入码时删掉下面的 -open，加入码会写进本日志（app.log）。
+  "$BIN" -addr ":$PORT" -data "$DATA_DIR" -open >> "$LOG_FILE" 2>&1 &
+  echo "$!" > "$PID_FILE"
+}
+
+stop_app() {
+  log_msg "Stopping LanLink..."
+  if [ ! -f "$PID_FILE" ]; then
+    return 0
+  fi
+
+  local pid
+  pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+  if [ -z "$pid" ] || ! check_process "$pid"; then
+    rm -f "$PID_FILE"
+    return 0
+  fi
+
+  kill -TERM "$pid" 2>> "$LOG_FILE" || true
+  local count=0
+  while check_process "$pid" && [ "$count" -lt 10 ]; do
+    sleep 1
+    count=$((count + 1))
+  done
+  if check_process "$pid"; then
+    kill -KILL "$pid" 2>> "$LOG_FILE" || true
+  fi
+  rm -f "$PID_FILE"
+}
+
+case "$1" in
+  start)
+    start_app
+    ;;
+  stop)
+    stop_app
+    ;;
+  status)
+    if status_app; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Unknown command: $1" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    exit 1
+    ;;
+esac
