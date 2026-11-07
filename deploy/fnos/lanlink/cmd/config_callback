@@ -1,6 +1,6 @@
 #!/bin/bash
-# 应用设置保存后：校验新的端口与数据目录，并更新 ${TRIM_PKGETC}/settings.conf。
-# 如果设置页没有带值过来（例如字段被清空），沿用上一次保存的值。
+# 应用设置保存后：校验端口与数据目录。
+# 数据目录必须是应用用户真正能写的位置（也就是已经在「授权目录」里授权过的），否则拒绝保存。
 
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 PKGETC="${TRIM_PKGETC:-$PKGVAR}"
@@ -19,11 +19,12 @@ fail() {
 
 can_write() {
   local dir="$1" rc
+  [ -z "$dir" ] && return 1
   if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
     su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
     rc=$?
   else
-    : > "$dir/.lanlink_write_test" 2>/dev/null
+    : 2>/dev/null > "$dir/.lanlink_write_test"
     rc=$?
   fi
   rm -f "$dir/.lanlink_write_test" 2>/dev/null
@@ -60,12 +61,8 @@ if [ -n "$DATA_DIR" ]; then
     *..*) fail "数据目录不能包含 ..，当前填的是：$DATA_DIR" ;;
   esac
   mkdir -p "$DATA_DIR" 2>/dev/null || fail "无法创建数据目录：$DATA_DIR"
-  if [ "$(id -u)" = "0" ] && [ -n "$TRIM_UID" ] && [ -n "$TRIM_GID" ]; then
-    chown "$TRIM_UID:$TRIM_GID" "$DATA_DIR" 2>/dev/null
-  fi
-  chmod 770 "$DATA_DIR" 2>/dev/null
   if ! can_write "$DATA_DIR"; then
-    fail "应用用户（${TRIM_USERNAME:-lanlink}）无法写入数据目录，请换一个目录或调整权限：$DATA_DIR"
+    fail "LanLink 无法写入 $DATA_DIR。飞牛默认不允许应用访问用户目录：请先在「应用设置 → 授权目录」里把该目录授权给 LanLink，再回来保存数据目录。"
   fi
   log_msg "数据目录已就绪：$DATA_DIR（重启应用后生效）"
 fi

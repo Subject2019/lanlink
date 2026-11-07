@@ -1,7 +1,7 @@
 #!/bin/bash
 # LanLink 飞牛应用：启动 / 停止 / 状态
-# 端口与数据目录来自安装向导（wizard_port / wizard_data_dir），
-# 同时备份在 ${TRIM_PKGETC}/settings.conf，避免启动时拿不到向导变量。
+# 端口来自安装向导/应用设置（wizard_port），数据目录优先级：
+#   向导值 > settings.conf > 用户授权目录（TRIM_DATA_ACCESSIBLE_PATHS）> 应用共享目录
 
 APP_DIR="${TRIM_APPDEST}/server"
 BIN="${APP_DIR}/lanlink-server"
@@ -14,18 +14,11 @@ CONF="${PKGETC}/settings.conf"
 port=""
 data_dir=""
 if [ -f "$CONF" ]; then
-  # 由本应用自己写入的两行键值，内容已在校验阶段规范过
+  # 由本应用自己写入的两行键值
   . "$CONF"
 fi
 
 PORT="${wizard_port:-${port:-${TRIM_SERVICE_PORT:-8787}}}"
-DATA_DIR="${wizard_data_dir:-${data_dir:-}}"
-if [ -z "$DATA_DIR" ]; then
-  DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
-fi
-if [ -z "$DATA_DIR" ]; then
-  DATA_DIR="${PKGVAR}/data"
-fi
 
 log_msg() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
@@ -37,6 +30,48 @@ check_process() {
 
 port_in_use() {
   ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
+}
+
+# 以应用用户身份判断目录可写（脚本若以 root 运行，直接写测试会误判）
+can_write() {
+  local dir="$1" rc
+  [ -z "$dir" ] && return 1
+  mkdir -p "$dir" 2>/dev/null
+  if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
+    su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
+    rc=$?
+  else
+    : 2>/dev/null > "$dir/.lanlink_write_test"
+    rc=$?
+  fi
+  rm -f "$dir/.lanlink_write_test" 2>/dev/null
+  return $rc
+}
+
+# 依次尝试候选目录，返回第一个真正可写的
+resolve_data_dir() {
+  local d
+  if [ -n "${wizard_data_dir:-}" ] && can_write "$wizard_data_dir"; then
+    echo "$wizard_data_dir"
+    return 0
+  fi
+  if [ -n "${data_dir:-}" ] && can_write "$data_dir"; then
+    echo "$data_dir"
+    return 0
+  fi
+  local IFS=':'
+  for d in ${TRIM_DATA_ACCESSIBLE_PATHS:-}; do
+    if can_write "$d"; then
+      echo "$d"
+      return 0
+    fi
+  done
+  unset IFS
+  if can_write "${TRIM_DATA_SHARE_PATHS%%:*}"; then
+    echo "${TRIM_DATA_SHARE_PATHS%%:*}"
+    return 0
+  fi
+  return 1
 }
 
 status_app() {
@@ -61,16 +96,20 @@ start_app() {
     exit 1
   fi
 
-  mkdir -p "$DATA_DIR" || {
-    log_msg "无法创建数据目录 $DATA_DIR，启动失败。"
+  local resolved
+  resolved="$(resolve_data_dir)" || {
+    log_msg "没有可写的数据目录，启动失败。请在应用设置里更换数据目录，或先在「授权目录」里授权目标目录。"
     exit 1
   }
+  if [ -n "${wizard_data_dir:-}" ] && [ "$resolved" != "$wizard_data_dir" ]; then
+    log_msg "设置里的数据目录 ${wizard_data_dir} 不可写（多半是没在「授权目录」里授权），本次改用 $resolved"
+  fi
 
-  log_msg "Starting LanLink on :$PORT (data: $DATA_DIR)"
+  log_msg "Starting LanLink on :$PORT (data: $resolved)"
   cd "$APP_DIR" || exit 1
   # 默认免加入码，局域网设备打开网页填个名字就能用。
   # 需要加入码时删掉下面的 -open，加入码会写进本日志（app.log）。
-  "$BIN" -addr ":$PORT" -data "$DATA_DIR" -open >> "$LOG_FILE" 2>&1 &
+  "$BIN" -addr ":$PORT" -data "$resolved" -open >> "$LOG_FILE" 2>&1 &
   echo "$!" > "$PID_FILE"
 }
 

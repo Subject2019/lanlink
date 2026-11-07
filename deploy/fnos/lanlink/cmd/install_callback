@@ -1,6 +1,6 @@
 #!/bin/bash
-# 安装完成：校验向导里填的端口与数据目录，创建目录并授权给应用用户，
-# 把最终值写入 ${TRIM_PKGETC}/settings.conf 供启动脚本使用。
+# 安装完成：校验端口；如果向导里给了数据目录，能写就记下来，不能写就提示并先用默认目录。
+# 注意：安装阶段用户还没法「授权目录」，所以这里不做硬失败。
 
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 PKGETC="${TRIM_PKGETC:-$PKGVAR}"
@@ -17,14 +17,14 @@ fail() {
   exit 1
 }
 
-# 以应用用户身份探测目录是否可写（脚本若是 root，直接 touch 会误判）
 can_write() {
   local dir="$1" rc
+  [ -z "$dir" ] && return 1
   if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
     su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
     rc=$?
   else
-    : > "$dir/.lanlink_write_test" 2>/dev/null
+    : 2>/dev/null > "$dir/.lanlink_write_test"
     rc=$?
   fi
   rm -f "$dir/.lanlink_write_test" 2>/dev/null
@@ -45,19 +45,22 @@ log_msg "wizard_port=$PORT wizard_data_dir=${DATA_DIR:-（默认）} 执行用�
 if [ -n "$DATA_DIR" ]; then
   case "$DATA_DIR" in
     /*) ;;
-    *) fail "数据目录必须是绝对路径（以 / 开头），当前填的是：$DATA_DIR" ;;
+    *) DATA_DIR="" ; log_msg "数据目录不是绝对路径，改用默认目录" ;;
   esac
   case "$DATA_DIR" in
-    *..*) fail "数据目录不能包含 ..，当前填的是：$DATA_DIR" ;;
+    *..*) DATA_DIR="" ; log_msg "数据目录包含 ..，改用默认目录" ;;
   esac
-  mkdir -p "$DATA_DIR" 2>/dev/null || fail "无法创建数据目录：$DATA_DIR"
-  if [ "$(id -u)" = "0" ] && [ -n "$TRIM_UID" ] && [ -n "$TRIM_GID" ]; then
-    chown "$TRIM_UID:$TRIM_GID" "$DATA_DIR" 2>/dev/null
+fi
+
+if [ -n "$DATA_DIR" ]; then
+  mkdir -p "$DATA_DIR" 2>/dev/null || DATA_DIR=""
+  if [ -n "$DATA_DIR" ] && ! can_write "$DATA_DIR"; then
+    log_msg "数据目录 $DATA_DIR 当前不可写（还没在「授权目录」里授权给应用），本次先使用默认目录"
+    DATA_DIR=""
   fi
-  chmod 770 "$DATA_DIR" 2>/dev/null
-  if ! can_write "$DATA_DIR"; then
-    fail "应用用户（${TRIM_USERNAME:-lanlink}）无法写入数据目录，请换一个目录或调整权限：$DATA_DIR"
-  fi
+fi
+
+if [ -n "$DATA_DIR" ]; then
   log_msg "数据目录已就绪：$DATA_DIR"
 else
   log_msg "使用默认数据目录 ${TRIM_DATA_SHARE_PATHS%%:*}"
