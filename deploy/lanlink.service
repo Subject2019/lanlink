@@ -1,0 +1,25 @@
+[Unit]
+Description=LanLink 局域网互传服务
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lanlink
+Group=lanlink
+WorkingDirectory=/var/lib/lanlink
+ExecStart=/opt/lanlink/lanlink-server -addr :8787 -data /var/lib/lanlink
+Restart=always
+RestartSec=3
+# 体量小、常驻但不抢资源
+Nice=10
+MemoryHigh=128M
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/lanlink
+
+[Install]
+WantedBy=multi-user.target

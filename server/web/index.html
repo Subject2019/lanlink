@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d1117" />
+    <title>LanLink</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔗</text></svg>" />
+  </head>
+  <body>
+    <div id="app" class="app" hidden>
+      <header class="top">
+        <button id="btnDevices" class="icon" title="设备列表">👥<span id="onlineBadge" class="badge">0</span></button>
+        <div class="title">
+          <strong>LanLink</strong>
+          <span id="meName" class="muted"></span>
+        </div>
+        <button id="btnReload" class="icon" title="刷新">↻</button>
+      </header>
+
+      <main id="list" class="list"></main>
+
+      <div id="drop" class="drop" hidden>松开以上传文件</div>
+
+      <form id="composer" class="composer">
+        <textarea id="text" rows="1" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"></textarea>
+        <button type="button" id="btnFile" class="icon" title="发送文件">📎</button>
+        <button type="submit" id="btnSend" class="send">发送</button>
+        <input id="file" type="file" multiple hidden />
+      </form>
+
+      <div id="progressWrap" class="progress" hidden>
+        <div id="progressBar" class="bar"></div>
+        <span id="progressText" class="ptext"></span>
+      </div>
+    </div>
+
+    <div id="join" class="join" hidden>
+      <h1>LanLink</h1>
+      <p class="muted">局域网内互传文本与文件</p>
+      <label>设备名称
+        <input id="joinName" maxlength="24" placeholder="例如 客厅电脑 / 我的手机" autocomplete="off" />
+      </label>
+      <label>加入码
+        <input id="joinCode" inputmode="numeric" maxlength="12" placeholder="NAS 启动时打印的 6 位数字" autocomplete="off" />
+      </label>
+      <button id="btnJoin" class="send">加入</button>
+      <p id="joinErr" class="err"></p>
+    </div>
+
+    <div id="devices" class="sheet" hidden>
+      <div class="sheet-inner">
+        <div class="sheet-head">
+          <strong>设备</strong>
+          <button id="btnCloseDevices" class="icon">✕</button>
+        </div>
+        <ul id="deviceList" class="device-list"></ul>
+        <div class="rename">
+          <input id="renameInput" maxlength="24" placeholder="修改我的设备名" />
+          <button id="btnRename" class="send">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
