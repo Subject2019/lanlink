@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 一键构建：NAS 服务端 + Android 壳（可选）+ 飞牛 fpk
-# 用法：./build.sh [all|server|android|fnos]
+# 一键构建：NAS 服务端 + Android 客户端 + Windows 托盘 + 飞牛 fpk
+# 用法：./build.sh [all|server|android|win|fnos]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +23,12 @@ build_server() {
   (cd "$ROOT/server" && GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "$OUT/lanlink-server-arm64" .)
 }
 
+build_win() {
+  echo "[build] Windows 托盘客户端 (windows/amd64)"
+  (cd "$ROOT/client/windows" && GOOS=windows GOARCH=amd64 go build -trimpath \
+    -ldflags "-s -w -H windowsgui" -o "$OUT/lanlink-tray.exe" .)
+}
+
 build_fnos() {
   echo "[build] 飞牛 fpk"
   "$ROOT/deploy/fnos/build.sh"
@@ -43,11 +49,12 @@ build_android() {
 }
 
 case "$TARGET" in
-  all) build_server; build_android; build_fnos ;;
+  all) build_server; build_android; build_win; build_fnos ;;
   server) build_server ;;
   android) build_android ;;
+  win) build_win ;;
   fnos) build_fnos ;;
-  *) echo "用法: $0 [all|server|android|fnos]" >&2; exit 1 ;;
+  *) echo "用法: $0 [all|server|android|win|fnos]" >&2; exit 1 ;;
 esac
 
 echo

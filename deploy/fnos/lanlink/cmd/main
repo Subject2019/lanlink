@@ -1,7 +1,8 @@
 #!/bin/bash
 # LanLink 飞牛应用：启动 / 停止 / 状态
-# 端口来自安装向导/应用设置（wizard_port），数据目录优先级：
-#   向导值 > settings.conf > 用户授权目录（TRIM_DATA_ACCESSIBLE_PATHS）> 应用共享目录
+# 端口来自安装向导/应用设置（wizard_port）；数据目录优先级：
+#   want_data_dir（安装时选的，授权后自动启用）> wizard_data_dir > data_dir
+#   > 用户授权目录（TRIM_DATA_ACCESSIBLE_PATHS）> 应用共享目录
 
 APP_DIR="${TRIM_APPDEST}/server"
 BIN="${APP_DIR}/lanlink-server"
@@ -13,9 +14,11 @@ CONF="${PKGETC}/settings.conf"
 
 port=""
 data_dir=""
+want_data_dir=""
+max_mb=""
 if [ -f "$CONF" ]; then
-  # 由本应用自己写入的两行键值
-  . "$CONF"
+  # 由 install_callback / config_callback 写入，值用 %q 转义过，可含空格与中文
+  . "$CONF" 2>/dev/null || true
 fi
 
 PORT="${wizard_port:-${port:-${TRIM_SERVICE_PORT:-8787}}}"
@@ -38,7 +41,7 @@ can_write() {
   [ -z "$dir" ] && return 1
   mkdir -p "$dir" 2>/dev/null
   if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
-    su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
+    su -s /bin/sh "$TRIM_USERNAME" -c ': > "$1/.lanlink_write_test"' sh "$dir" >/dev/null 2>&1
     rc=$?
   else
     : 2>/dev/null > "$dir/.lanlink_write_test"
@@ -51,6 +54,11 @@ can_write() {
 # 依次尝试候选目录，返回第一个真正可写的
 resolve_data_dir() {
   local d
+  # 安装时选的目录优先：后来只要在「授权目录」里授权过，重启就会自动切过去
+  if [ -n "${want_data_dir:-}" ] && can_write "$want_data_dir"; then
+    echo "$want_data_dir"
+    return 0
+  fi
   if [ -n "${wizard_data_dir:-}" ] && can_write "$wizard_data_dir"; then
     echo "$wizard_data_dir"
     return 0
@@ -101,15 +109,17 @@ start_app() {
     log_msg "没有可写的数据目录，启动失败。请在应用设置里更换数据目录，或先在「授权目录」里授权目标目录。"
     exit 1
   }
-  if [ -n "${wizard_data_dir:-}" ] && [ "$resolved" != "$wizard_data_dir" ]; then
-    log_msg "设置里的数据目录 ${wizard_data_dir} 不可写（多半是没在「授权目录」里授权），本次改用 $resolved"
+  if [ -n "${want_data_dir:-}" ] && [ "$resolved" != "$want_data_dir" ]; then
+    log_msg "期望的数据目录 ${want_data_dir} 暂不可写（多半是还没在「应用设置 → 授权目录」里授权），本次改用 $resolved；授权后重启会自动切过去"
   fi
 
-  log_msg "Starting LanLink on :$PORT (data: $resolved)"
+  MAX_MB="${max_mb:-65536}"
+  log_msg "Starting LanLink on :$PORT (data: $resolved, free: $(df -h "$resolved" 2>/dev/null | awk 'NR==2 {print $4}'), max-mb: $MAX_MB)"
   cd "$APP_DIR" || exit 1
   # 默认免加入码，局域网设备打开网页填个名字就能用。
   # 需要加入码时删掉下面的 -open，加入码会写进本日志（app.log）。
-  "$BIN" -addr ":$PORT" -data "$resolved" -open >> "$LOG_FILE" 2>&1 &
+  # 单文件上限默认 64GB；要改就在 settings.conf 里加一行 max_mb=xxxxx（单位 MB）。
+  "$BIN" -addr ":$PORT" -data "$resolved" -open -max-mb "$MAX_MB" >> "$LOG_FILE" 2>&1 &
   echo "$!" > "$PID_FILE"
 }
 

@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"flag"
 	"image"
 	"image/color"
@@ -41,6 +43,51 @@ func main() {
 		}
 		println("wrote", path, size)
 	}
+	if err := saveICO(filepath.Join(*root, "client/windows/assets/icon.ico"), 64); err != nil {
+		panic(err)
+	}
+	println("wrote client/windows/assets/icon.ico")
+}
+
+// saveICO 生成标准 32bpp BMP 格式 .ico（Windows 托盘 LoadImage 需要）。
+func saveICO(path string, size int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	img := render(size)
+	rowBytes := size * 4
+	maskRow := ((size + 31) / 32) * 4
+	body := new(bytes.Buffer)
+
+	hdr := make([]byte, 40)
+	binary.LittleEndian.PutUint32(hdr[0:], 40)
+	binary.LittleEndian.PutUint32(hdr[4:], uint32(size))
+	binary.LittleEndian.PutUint32(hdr[8:], uint32(size*2)) // XOR + AND
+	binary.LittleEndian.PutUint16(hdr[12:], 1)
+	binary.LittleEndian.PutUint16(hdr[14:], 32)
+	binary.LittleEndian.PutUint32(hdr[20:], uint32(rowBytes*size+maskRow*size))
+	body.Write(hdr)
+
+	// BMP 是自下而上的 BGRA
+	for y := size - 1; y >= 0; y-- {
+		for x := 0; x < size; x++ {
+			c := img.NRGBAAt(x, y)
+			body.Write([]byte{c.B, c.G, c.R, c.A})
+		}
+	}
+	body.Write(make([]byte, maskRow*size)) // AND mask 全 0 = 完全不透明
+
+	ico := new(bytes.Buffer)
+	binary.Write(ico, binary.LittleEndian, uint16(0))
+	binary.Write(ico, binary.LittleEndian, uint16(1))
+	binary.Write(ico, binary.LittleEndian, uint16(1))
+	ico.Write([]byte{byte(size), byte(size), 0, 0})
+	binary.Write(ico, binary.LittleEndian, uint16(1))
+	binary.Write(ico, binary.LittleEndian, uint16(32))
+	binary.Write(ico, binary.LittleEndian, uint32(body.Len()))
+	binary.Write(ico, binary.LittleEndian, uint32(22))
+	ico.Write(body.Bytes())
+	return os.WriteFile(path, ico.Bytes(), 0o644)
 }
 
 func save(path string, size int) error {

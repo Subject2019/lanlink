@@ -52,6 +52,66 @@
     return 'Linux';
   };
 
+  // ---------- 分享到其他应用 ----------
+  const copyText = async (text, okMsg) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast(okMsg);
+    } catch {
+      toast('无法分享，请长按复制');
+    }
+  };
+
+  // 安卓 App 走系统分享面板；普通浏览器降级到 Web Share API / 复制链接
+  const shareMessage = async (m) => {
+    const native = window.LanLinkNative;
+    if (m.kind === 'file' && m.file) {
+      const href = new URL(
+        url(`api/files/${m.id}?n=${encodeURIComponent(m.file.name)}`),
+        location.href
+      ).href;
+      if (native && native.shareFile) return native.shareFile(href, m.file.name, m.file.mime || '');
+      if (navigator.share && navigator.canShare) {
+        try {
+          toast('正在准备文件…');
+          const res = await fetch(href, { credentials: 'same-origin' });
+          if (!res.ok) throw new Error('fetch failed');
+          const blob = await res.blob();
+          const file = new File([blob], m.file.name, {
+            type: m.file.mime || blob.type || 'application/octet-stream',
+          });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: m.file.name });
+            return;
+          }
+        } catch {}
+      }
+      return copyText(href, '已复制文件链接');
+    }
+
+    const text = m.text || '';
+    if (!text) return;
+    if (native && native.shareText) return native.shareText(text);
+    if (navigator.share) {
+      try {
+        await navigator.share({ text, title: '来自 LanLink' });
+        return;
+      } catch {}
+    }
+    return copyText(text, '已复制文本');
+  };
+
   // ---------- 渲染 ----------
   const atBottom = () => {
     const l = $('list');
@@ -100,6 +160,18 @@
       b.textContent = m.text;
       row.appendChild(b);
     }
+
+    const share = document.createElement('button');
+    share.type = 'button';
+    share.className = 'share-btn';
+    share.textContent = '↗ 分享';
+    share.title = '分享到其他应用';
+    share.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shareMessage(m);
+    });
+    row.appendChild(share);
     return row;
   }
 
@@ -188,6 +260,10 @@
       renderAll();
       renderDevices();
       connect();
+      // 登录态已就绪，让原生补发之前暂存的系统分享
+      if (window.LanLinkNative && window.LanLinkNative.onReady) {
+        window.LanLinkNative.onReady();
+      }
     } catch (err) {
       if (err.message !== 'unauthorized') toast(err.message);
     }
@@ -225,18 +301,14 @@
     }
   }
 
-  function uploadFile(file) {
+  function uploadFile(file, onProgress) {
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', url('api/files?name=' + encodeURIComponent(file.name)));
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
       xhr.setRequestHeader('X-File-Type', file.type || '');
       xhr.upload.onprogress = (e) => {
-        if (!e.lengthComputable) return;
-        const pct = Math.round((e.loaded / e.total) * 100);
-        $('progressWrap').hidden = false;
-        $('progressBar').style.width = pct + '%';
-        $('progressText').textContent = `${file.name} ${pct}%`;
+        if (e.lengthComputable) onProgress(e.loaded);
       };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
@@ -244,7 +316,12 @@
             appendMessage(JSON.parse(xhr.responseText), true);
           } catch {}
         } else {
-          toast(`上传失败：${file.name}`);
+          // 服务端会给出「存储空间不足」等具体原因，别只显示文件名
+          let msg = '';
+          try {
+            msg = JSON.parse(xhr.responseText).error || '';
+          } catch {}
+          toast(msg ? `上传失败：${msg}` : `上传失败：${file.name}`);
         }
         resolve();
       };
@@ -256,13 +333,36 @@
     });
   }
 
-  async function sendFiles(files) {
-    if (!files || !files.length) return;
+  // 一次选择的文件并发上传，进度条按所有文件的总字节数汇总
+  async function sendFiles(fileList) {
+    const list = Array.from(fileList || []);
+    if (!list.length) return;
     if (state.uploading) return toast('正在上传，请稍候');
     state.uploading = true;
-    for (const f of files) await uploadFile(f);
+
+    const total = list.reduce((sum, f) => sum + f.size, 0) || 1;
+    const loaded = list.map(() => 0);
+    const wrap = $('progressWrap');
+    wrap.hidden = false;
+    const update = () => {
+      const done = loaded.reduce((a, b) => a + b, 0);
+      const pct = Math.min(100, Math.round((done / total) * 100));
+      $('progressBar').style.width = pct + '%';
+      $('progressText').textContent = `${list.length} 个文件 · ${pct}%`;
+    };
+    update();
+
+    await Promise.all(
+      list.map((file, i) =>
+        uploadFile(file, (bytes) => {
+          loaded[i] = bytes;
+          update();
+        })
+      )
+    );
+
     state.uploading = false;
-    $('progressWrap').hidden = true;
+    wrap.hidden = true;
     $('progressBar').style.width = '0';
   }
 
@@ -317,7 +417,14 @@
     }
   });
 
-  $('btnFile').addEventListener('click', () => $('file').click());
+  $('btnFile').addEventListener('click', () => {
+    // 安卓原生壳接管多选，绕开 WebView 只回传第一个文件的老问题
+    if (window.LanLinkNative && window.LanLinkNative.pickFiles) {
+      window.LanLinkNative.pickFiles();
+    } else {
+      $('file').click();
+    }
+  });
   $('file').addEventListener('change', (e) => {
     sendFiles(e.target.files);
     e.target.value = '';
@@ -343,6 +450,14 @@
   });
 
   // 设备抽屉
+  if (window.LanLinkNative && window.LanLinkNative.openSettings) {
+    $('btnNativeSettings').hidden = false;
+    $('btnNativeSettings').addEventListener('click', () => window.LanLinkNative.openSettings());
+  }
+  if (window.LanLinkNative && window.LanLinkNative.shareServer) {
+    $('btnShareApp').hidden = false;
+    $('btnShareApp').addEventListener('click', () => window.LanLinkNative.shareServer());
+  }
   $('btnDevices').addEventListener('click', () => ($('devices').hidden = false));
   $('btnCloseDevices').addEventListener('click', () => ($('devices').hidden = true));
   $('devices').addEventListener('click', (e) => {

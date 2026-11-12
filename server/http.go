@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,7 +23,9 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"open": a.cfg.Open, "version": version})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"open": a.cfg.Open, "version": version, "maxBytes": a.cfg.MaxBytes,
+		})
 	})
 	mux.HandleFunc("POST /api/join", a.handleJoin)
 	mux.HandleFunc("GET /api/state", a.auth(a.handleState))
@@ -250,8 +254,23 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, d *Device) {
 		return
 	}
 	if r.ContentLength > a.cfg.MaxBytes {
-		fail(w, http.StatusRequestEntityTooLarge, "文件超出大小限制")
+		fail(w, http.StatusRequestEntityTooLarge, fmt.Sprintf(
+			"单个文件上限 %s，本次 %s。请在服务端调整 -max-mb（或 LANLINK_MAX_MB）后重试",
+			fmtBytes(uint64(a.cfg.MaxBytes)), fmtBytes(uint64(r.ContentLength))))
 		return
+	}
+	// 大文件：按声明的大小先看剩余空间，避免写一半把存储池占满。
+	// chunked 上传（ContentLength < 0）没法预检，靠下面的 ENOSPC 兜底。
+	if r.ContentLength > 0 {
+		if free, err := freeSpace(a.cfg.DataDir); err == nil {
+			const reserve = 64 << 20 // 给聊天记录等留一点余量
+			if free < reserve || uint64(r.ContentLength) > free-reserve {
+				fail(w, http.StatusInsufficientStorage, fmt.Sprintf(
+					"存储空间不足：可用 %s，本次需要 %s。请清理空间，或到飞牛「应用设置 → 数据目录」换一个更大的目录",
+					fmtBytes(free), fmtBytes(uint64(r.ContentLength))))
+				return
+			}
+		}
 	}
 	id := newID()
 	dst := a.store.FilePath(id)
@@ -265,6 +284,11 @@ func (a *App) handleUpload(w http.ResponseWriter, r *http.Request, d *Device) {
 	closeErr := f.Close()
 	if copyErr != nil || closeErr != nil {
 		_ = os.Remove(dst)
+		if errors.Is(copyErr, syscall.ENOSPC) || errors.Is(closeErr, syscall.ENOSPC) {
+			fail(w, http.StatusInsufficientStorage,
+				"存储空间不足，文件没有保存完整。请清理空间，或到飞牛「应用设置 → 数据目录」换一个更大的目录")
+			return
+		}
 		fail(w, http.StatusBadRequest, "上传中断")
 		return
 	}
@@ -325,6 +349,29 @@ func (a *App) handleRename(w http.ResponseWriter, r *http.Request, d *Device) {
 }
 
 // ---------- 辅助 ----------
+
+// freeSpace 返回数据目录所在文件系统的可用字节数（Bavail 只算普通用户能用的块）。
+func freeSpace(dir string) (uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	return st.Bavail * uint64(st.Bsize), nil
+}
+
+func fmtBytes(n uint64) string {
+	f := float64(n)
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	i := 0
+	for f >= 1024 && i < len(units)-1 {
+		f /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f %s", f, units[i])
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

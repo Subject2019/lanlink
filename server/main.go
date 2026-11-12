@@ -30,7 +30,16 @@ type App struct {
 func main() {
 	addr := flag.String("addr", envOr("LANLINK_ADDR", ":8787"), "监听地址，例如 :8787")
 	dataDir := flag.String("data", envOr("LANLINK_DATA", "./data"), "数据目录")
-	maxMB := flag.Int64("max-mb", 4096, "单个文件大小上限（MB）")
+	// 默认 64GB：局域网里传十几 GB 的蓝光原盘/录像很常见，4GB 的旧默认值会直接挡掉。
+	// 真正的兜底是磁盘剩余空间检查（见 handleUpload），上限只用来防止误传超大文件。
+	defaultMaxMB := int64(65536)
+	if v := os.Getenv("LANLINK_MAX_MB"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			defaultMaxMB = n
+		}
+	}
+	maxMB := flag.Int64("max-mb", defaultMaxMB,
+		"单个文件大小上限（MB），默认 65536；也可用 LANLINK_MAX_MB 覆盖")
 	discover := flag.Bool("discover", true, "开启 UDP 自动发现，客户端可零配置连接")
 	open := flag.Bool("open", envOr("LANLINK_OPEN", "") == "1", "免加入码：局域网设备填个名字即可加入")
 	flag.Parse()

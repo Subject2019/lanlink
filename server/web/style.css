@@ -192,6 +192,25 @@ textarea {
   color: #fff;
 }
 
+/* 每条消息的「分享到其他应用」 */
+.share-btn {
+  align-self: flex-start;
+  margin: 4px 4px 0;
+  padding: 2px 9px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.row.mine .share-btn {
+  align-self: flex-end;
+}
+.share-btn:active {
+  transform: scale(0.96);
+}
+
 .sysline {
   align-self: center;
   font-size: 12px;
@@ -360,6 +379,16 @@ textarea:focus {
 .rename {
   display: flex;
   gap: 8px;
+}
+.native-settings {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--fg);
+  cursor: pointer;
 }
 
 .toast {

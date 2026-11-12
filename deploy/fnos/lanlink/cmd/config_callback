@@ -1,6 +1,8 @@
 #!/bin/bash
 # 应用设置保存后：校验端口与数据目录。
-# 数据目录必须是应用用户真正能写的位置（也就是已经在「授权目录」里授权过的），否则拒绝保存。
+# 数据目录必须是应用用户真正能写的位置（已在「授权目录」里授权过），否则拒绝保存。
+# 留空表示「保持当前设置不变」（安装时选的目录不会被清掉），填 default 表示回到默认目录。
+# data_dir 与 want_data_dir 一起落盘：前者当前生效，后者是授权后自动启用的期望目录。
 
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 PKGETC="${TRIM_PKGETC:-$PKGVAR}"
@@ -21,7 +23,7 @@ can_write() {
   local dir="$1" rc
   [ -z "$dir" ] && return 1
   if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
-    su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
+    su -s /bin/sh "$TRIM_USERNAME" -c ': > "$1/.lanlink_write_test"' sh "$dir" >/dev/null 2>&1
     rc=$?
   else
     : 2>/dev/null > "$dir/.lanlink_write_test"
@@ -33,15 +35,28 @@ can_write() {
 
 old_port=""
 old_dir=""
+old_want=""
+old_max=""
 if [ -f "$CONF" ]; then
-  . "$CONF"
+  . "$CONF" 2>/dev/null || true
   old_port="$port"
   old_dir="$data_dir"
+  old_want="${want_data_dir:-}"
+  old_max="${max_mb:-}"
 fi
 
 PORT="${wizard_port:-$old_port}"
 PORT="${PORT:-${TRIM_SERVICE_PORT:-8787}}"
-DATA_DIR="${wizard_data_dir:-$old_dir}"
+
+RAW="${wizard_data_dir:-}"
+if [ "$RAW" = "default" ]; then
+  DATA_DIR=""
+  WANT_DIR=""
+  log_msg "用户选择回到默认数据目录"
+else
+  DATA_DIR="${wizard_data_dir:-${old_want:-$old_dir}}"
+  WANT_DIR="$DATA_DIR"
+fi
 
 case "$PORT" in
   ''|*[!0-9]*) fail "服务端口必须是数字，当前填的是：$PORT" ;;
@@ -64,11 +79,14 @@ if [ -n "$DATA_DIR" ]; then
   if ! can_write "$DATA_DIR"; then
     fail "LanLink 无法写入 $DATA_DIR。飞牛默认不允许应用访问用户目录：请先在「应用设置 → 授权目录」里把该目录授权给 LanLink，再回来保存数据目录。"
   fi
-  log_msg "数据目录已就绪：$DATA_DIR（重启应用后生效）"
+  log_msg "数据目录已就绪：$DATA_DIR（可用空间 $(df -h "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $4}')，重启应用后生效）"
+else
+  log_msg "使用默认数据目录 ${TRIM_DATA_SHARE_PATHS%%:*}（重启应用后生效）"
 fi
 
 mkdir -p "$PKGETC" 2>/dev/null
-printf 'port=%s\ndata_dir=%s\n' "$PORT" "$DATA_DIR" > "$CONF" 2>/dev/null
+printf 'port=%q\ndata_dir=%q\nwant_data_dir=%q\nmax_mb=%q\n' \
+  "$PORT" "$DATA_DIR" "$WANT_DIR" "$old_max" > "$CONF" 2>/dev/null
 chmod 644 "$CONF" 2>/dev/null
 
 exit 0

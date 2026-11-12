@@ -1,6 +1,9 @@
 #!/bin/bash
-# 安装完成：校验端口；如果向导里给了数据目录，能写就记下来，不能写就提示并先用默认目录。
-# 注意：安装阶段用户还没法「授权目录」，所以这里不做硬失败。
+# 安装完成：校验端口，并记住用户选的数据目录。
+# 安装阶段还没法在「授权目录」里授权，所以不要求目标目录此刻可写：
+#   want_data_dir = 用户期望的目录（授权后由 cmd/main 自动启用）
+#   data_dir      = 现在就能写的目录；为空则本次先用默认共享目录
+# 这样用户装好后只要授权一次、重启，就会切到大容量目录，不必再回设置里填一遍。
 
 PKGVAR="${TRIM_PKGVAR:-/tmp}"
 PKGETC="${TRIM_PKGETC:-$PKGVAR}"
@@ -21,7 +24,8 @@ can_write() {
   local dir="$1" rc
   [ -z "$dir" ] && return 1
   if [ "$(id -u)" = "0" ] && [ -n "${TRIM_USERNAME:-}" ]; then
-    su -s /bin/sh "$TRIM_USERNAME" -c ": > '$dir/.lanlink_write_test'" >/dev/null 2>&1
+    # 目录作为参数传进去，路径里有空格/引号也不会被 shell 拆错
+    su -s /bin/sh "$TRIM_USERNAME" -c ': > "$1/.lanlink_write_test"' sh "$dir" >/dev/null 2>&1
     rc=$?
   else
     : 2>/dev/null > "$dir/.lanlink_write_test"
@@ -31,6 +35,17 @@ can_write() {
   return $rc
 }
 
+free_of() {
+  df -h "$1" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# 覆盖安装时别把用户手改的 max_mb 冲掉
+old_max=""
+if [ -f "$CONF" ]; then
+  . "$CONF" 2>/dev/null || true
+  old_max="${max_mb:-}"
+fi
+
 PORT="${wizard_port:-8787}"
 case "$PORT" in
   ''|*[!0-9]*) fail "服务端口必须是数字，当前填的是：$PORT" ;;
@@ -39,35 +54,42 @@ if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
   fail "服务端口需要在 1024-65535 之间，当前填的是：$PORT"
 fi
 
-DATA_DIR="${wizard_data_dir:-}"
-log_msg "wizard_port=$PORT wizard_data_dir=${DATA_DIR:-（默认）} 执行用户=$(id -un)($(id -u))"
+WANT_DIR="${wizard_data_dir:-}"
+DATA_DIR=""
+log_msg "wizard_port=$PORT wizard_data_dir=${WANT_DIR:-（默认）} 执行用户=$(id -un)($(id -u))"
 
-if [ -n "$DATA_DIR" ]; then
-  case "$DATA_DIR" in
+if [ -n "$WANT_DIR" ]; then
+  case "$WANT_DIR" in
     /*) ;;
-    *) DATA_DIR="" ; log_msg "数据目录不是绝对路径，改用默认目录" ;;
+    *) log_msg "数据目录不是绝对路径，忽略：$WANT_DIR"; WANT_DIR="" ;;
   esac
-  case "$DATA_DIR" in
-    *..*) DATA_DIR="" ; log_msg "数据目录包含 ..，改用默认目录" ;;
+  case "$WANT_DIR" in
+    *..*) log_msg "数据目录包含 ..，忽略：$WANT_DIR"; WANT_DIR="" ;;
   esac
 fi
 
-if [ -n "$DATA_DIR" ]; then
-  mkdir -p "$DATA_DIR" 2>/dev/null || DATA_DIR=""
-  if [ -n "$DATA_DIR" ] && ! can_write "$DATA_DIR"; then
-    log_msg "数据目录 $DATA_DIR 当前不可写（还没在「授权目录」里授权给应用），本次先使用默认目录"
-    DATA_DIR=""
+if [ -n "$WANT_DIR" ]; then
+  mkdir -p "$WANT_DIR" 2>/dev/null
+  log_msg "目标数据目录可用空间：$(free_of "$WANT_DIR")"
+  if can_write "$WANT_DIR"; then
+    DATA_DIR="$WANT_DIR"
+    log_msg "数据目录已就绪：$DATA_DIR"
+  else
+    log_msg "数据目录 $WANT_DIR 当前不可写（还没在「授权目录」里授权给应用），先记下，本次使用默认目录"
   fi
 fi
 
-if [ -n "$DATA_DIR" ]; then
-  log_msg "数据目录已就绪：$DATA_DIR"
-else
+if [ -z "$DATA_DIR" ]; then
   log_msg "使用默认数据目录 ${TRIM_DATA_SHARE_PATHS%%:*}"
+fi
+if [ -n "$WANT_DIR" ]; then
+  log_msg "期望目录已保存：$WANT_DIR；在「应用设置 → 授权目录」授权后重启即自动生效"
 fi
 
 mkdir -p "$PKGETC" 2>/dev/null
-printf 'port=%s\ndata_dir=%s\n' "$PORT" "$DATA_DIR" > "$CONF" 2>/dev/null
+# %q 保证中文/带空格的路径被 source 时仍然是完整的一个值
+printf 'port=%q\ndata_dir=%q\nwant_data_dir=%q\nmax_mb=%q\n' \
+  "$PORT" "$DATA_DIR" "$WANT_DIR" "$old_max" > "$CONF" 2>/dev/null
 chmod 644 "$CONF" 2>/dev/null
 
 exit 0

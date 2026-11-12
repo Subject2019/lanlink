@@ -1,5 +1,5 @@
 appname               = lanlink
-version               = 1.0.0
+version               = 1.2.0
 display_name          = LanLink 邻传
 desc                  = 局域网互传文本与文件，手机平板电脑打开网页就能收发
 platform              = x86
